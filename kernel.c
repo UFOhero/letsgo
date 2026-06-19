@@ -121,14 +121,21 @@ static void execute_command(char *cmd) {
         int ret = exec(exec_path, exec_argv, &u_argc, &u_argv);
         
         if (ret == 0) {
+            extern volatile int switch_to_user;
+            extern uint64_t user_satp;
+            
             uint64_t satp = ((8ULL << 60) | ((uint64_t)current->pagetable >> 12));
             uint64_t sstatus = r_sstatus();
-            sstatus &= ~(1ULL << 8); 
-            sstatus |= (1ULL << 5);  
+            sstatus &= ~(1ULL << 8); // 设置进入 User 模式
+            sstatus |= (1ULL << 5);  // 开启中断 SPIE
             
-            // 【核心修复2】：在最后的 clobber 列表里加上 "a0" 和 "a1"
-            // 这会警告 GCC 编译器：“不要把我的参数分配到这两个寄存器上！”
+            // 【核心修复】：必须通知 trap_vec 系统我们要去用户态了！
+            switch_to_user = 1;
+            user_satp = satp;
+            uint64_t kstack_top = current->kstack;
+            
             __asm__ volatile(
+                "csrw sscratch, %6\n"   // <--- 救命的寄存器！为下一次中断提供内核栈入口！
                 "csrw satp, %0\n"
                 "sfence.vma zero, zero\n"
                 "csrw sstatus, %1\n"
@@ -138,8 +145,8 @@ static void execute_command(char *cmd) {
                 "mv a1, %5\n"
                 "sret\n"
                 : : "r"(satp), "r"(sstatus), "r"(current->entry), "r"(current->ustack),
-                    "r"(u_argc), "r"(u_argv)
-                : "a0", "a1", "memory"  // <-- 关键的保护网
+                    "r"(u_argc), "r"(u_argv), "r"(kstack_top)
+                : "a0", "a1", "memory" 
             );
             while(1);
         }

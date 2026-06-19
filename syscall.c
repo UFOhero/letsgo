@@ -95,7 +95,7 @@ static uint64_t sys_dup2(uint64_t oldfd, uint64_t newfd) {
 
 static uint64_t sys_fork(void) {
     // 记录下 fork 前的父进程 PID
-    int parent_pid = current->pid;
+    uint64_t parent_pid = current->pid;
     
     int ret = fork(); 
     
@@ -117,8 +117,11 @@ static uint64_t sys_get_tick(void) {
 
 void handle_syscall(struct trapframe *tf) {
     // 【核心修复】：在处理可能阻塞的系统调用期间，必须开放 S 模式的中断接收！
-    // 否则阻塞时的 yield() 将导致 UART 中断永远无法打断 CPU，键盘必定卡死。
-    w_sstatus(r_sstatus() | SSTATUS_SIE);
+    // 同时，必须开启 SUM (Supervisor User Memory) 位（即 1 << 18）。
+    // 否则内核在 sys_write 读取用户字符串，或在 sys_wait 写入 status 时，
+    // 会因为没有权限访问 PTE_U 的内存页而触发 Cause 15 死循环！
+    uint64_t current_sstatus = r_sstatus();
+    w_sstatus(current_sstatus | SSTATUS_SIE | (1ULL << 18));
 
     uint64_t syscall_num = tf->a7;
     uint64_t ret_val = 0;

@@ -8,6 +8,14 @@
 #include "fs.h"
 #include "string.h"
 
+#ifndef PTE_V
+#define PTE_V (1 << 0)
+#define PTE_R (1 << 1)
+#define PTE_W (1 << 2)
+#define PTE_X (1 << 3)
+#define PTE_U (1 << 4)
+#endif
+
 volatile int exit_code_trampoline;
 extern uint64_t *kernel_pagetable;
 
@@ -25,7 +33,7 @@ volatile int need_resched = 0;
 static struct proc* allocproc(void) {
     for (int i = 0; i < NPROC; i++) {
         if (procs[i].state == UNUSED) {
-            memset(&procs[i], 0, sizeof(struct proc));   // 彻底清零
+            memset(&procs[i], 0, sizeof(struct proc));
             procs[i].pid = i;
             procs[i].state = RUNNABLE;
             procs[i].kstack = (uint64)&stacks[i][8192] & ~0xf;
@@ -55,7 +63,6 @@ int create_proc(void (*func)(void)) {
     return p->pid;
 }
 
-/* 调度器算法省略，同前 */
 static struct proc* RR_select(void) {
     for (int i = 0; i < NPROC; i++) {
         int pid = (next_pid + i) % NPROC;
@@ -185,6 +192,77 @@ int wait(int pid, int *status) {
     }
 }
 
+// -------------------------------------------------------------
+// 【深度克隆用户页表】 物理隔离父子进程
+// -------------------------------------------------------------
+uint64_t* clone_user_pagetable(uint64_t *parent_pt) {
+    uint64_t *child_pt = (uint64_t *)pmm_alloc_frame();
+    if (!child_pt) return 0;
+    memset(child_pt, 0, 4096); 
+    
+    for(int i = 256; i < 512; i++) child_pt[i] = parent_pt[i];
+    for(int i = 2; i < 256; i++) child_pt[i] = parent_pt[i];
+
+    for (int i = 0; i < 2; i++) {
+        uint64_t pte1 = parent_pt[i];
+        if ((pte1 & PTE_V) && (pte1 & (PTE_R|PTE_W|PTE_X)) == 0) { 
+            uint64_t *pt1 = (uint64_t *)((pte1 >> 10) << 12);
+            uint64_t *new_pt1 = (uint64_t *)pmm_alloc_frame();
+            memset(new_pt1, 0, 4096);
+            child_pt[i] = (((uint64_t)new_pt1 >> 12) << 10) | PTE_V;
+            
+            for (int j = 0; j < 512; j++) {
+                uint64_t pte2 = pt1[j];
+                if ((pte2 & PTE_V) && (pte2 & (PTE_R|PTE_W|PTE_X)) == 0) { 
+                    uint64_t *pt2 = (uint64_t *)((pte2 >> 10) << 12);
+                    uint64_t *new_pt2 = (uint64_t *)pmm_alloc_frame();
+                    memset(new_pt2, 0, 4096);
+                    new_pt1[j] = (((uint64_t)new_pt2 >> 12) << 10) | PTE_V;
+                    
+                    for (int k = 0; k < 512; k++) {
+                        uint64_t pte3 = pt2[k];
+                        if ((pte3 & PTE_V) && (pte3 & PTE_U)) { 
+                            void *old_page = (void *)((pte3 >> 10) << 12);
+                            void *new_page = pmm_alloc_frame();
+                            uint64_t *src = (uint64_t *)old_page;
+                            uint64_t *dst = (uint64_t *)new_page;
+                            for(int b = 0; b < 512; b++) dst[b] = src[b]; 
+                            new_pt2[k] = (((uint64_t)new_page >> 12) << 10) | (pte3 & 0x3FF);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return child_pt;
+}
+
+// -------------------------------------------------------------
+// 【核心修复】：上下文快照捕获，解决 C 语言 Epilogue 丢失问题
+// -------------------------------------------------------------
+asm(
+    ".text\n"
+    ".global capture_context\n"
+    "capture_context:\n"
+    "sd ra, 0(a0)\n"
+    "sd sp, 8(a0)\n"
+    "sd s0, 16(a0)\n"
+    "sd s1, 24(a0)\n"
+    "sd s2, 32(a0)\n"
+    "sd s3, 40(a0)\n"
+    "sd s4, 48(a0)\n"
+    "sd s5, 56(a0)\n"
+    "sd s6, 64(a0)\n"
+    "sd s7, 72(a0)\n"
+    "sd s8, 80(a0)\n"
+    "sd s9, 88(a0)\n"
+    "sd s10, 96(a0)\n"
+    "sd s11, 104(a0)\n"
+    "li a0, 0\n"       // 父进程在此返回 0
+    "ret\n"
+);
+extern uint64 capture_context(uint64 *ctx);
+
 int fork(void) {
     struct proc *np;
     uint64 ra, sp;
@@ -195,7 +273,6 @@ int fork(void) {
     np = allocproc();
     if(np == 0) return -1;
 
-    // 【新增这三行】：继承父进程的页表和虚拟地址空间，确保子进程能回到用户态
     np->pagetable = current->pagetable;
     np->ustack = current->ustack;
     np->entry = current->entry;
@@ -213,21 +290,31 @@ int fork(void) {
     asm volatile("mv %0, s10" : "=r"(s_regs[10]));
     asm volatile("mv %0, s11" : "=r"(s_regs[11]));
 
-    uint64 *parent_stack = (uint64 *)(current->kstack - 8192);
+    uint64 parent_base = current->kstack - 8192;
+    uint64 parent_top = current->kstack;
+    uint64 child_top = np->kstack;
+
+    uint64 *parent_stack = (uint64 *)parent_base;
     uint64 *child_stack = (uint64 *)(np->kstack - 8192);
-    for(uint64 i = 0; i < 8192UL / sizeof(uint64); i++) child_stack[i] = parent_stack[i];
+    
+    // 【深度修复】：遍历子进程栈，重写所有的帧指针！彻底切断与父进程的孽缘！
+    for(uint64 i = 0; i < 8192UL / sizeof(uint64); i++) {
+        uint64 val = parent_stack[i];
+        if (val >= parent_base && val <= parent_top) {
+            val = child_top - (parent_top - val); // 地址重定向到子栈
+        }
+        child_stack[i] = val;
+    }
 
     for(int i = 0; i < 32; i++) np->context[i] = 0;
     np->context[0] = ra;
-    uint64 offset = current->kstack - sp;
-    np->context[1] = np->kstack - offset;
+    uint64 offset = parent_top - sp;
+    np->context[1] = child_top - offset;
     
-    // 【核心修复】：重新定位子进程的帧指针 (Frame Pointers)
-    // 防止子进程通过 s0 访问/修改到父进程的局部变量区！
     for(int i = 0; i < 12; i++) {
         uint64 val = s_regs[i];
-        if (val >= (current->kstack - 8192) && val <= current->kstack) {
-            val = np->kstack - (current->kstack - val);
+        if (val >= parent_base && val <= parent_top) {
+            val = child_top - (parent_top - val);
         }
         np->context[2 + i] = val;
     }
@@ -251,12 +338,12 @@ int exec(const char *path, char *const argv[], uint64_t *out_argc, uint64_t *out
     fs_close(fd);
     if (size <= 0) { kfree(elf_buf); return -1; }
 
-    // 我们依然解析 ELF，但忽略它推荐的 user_stack
     uint32_t entry, user_stack_ignored;
     if (load_elf(elf_buf, &entry, &user_stack_ignored) != 0) { kfree(elf_buf); return -1; }
 
     uint64_t *user_pagetable = (uint64_t *)pmm_alloc_frame();
     if (!user_pagetable) { kfree(elf_buf); return -1; }
+    memset(user_pagetable, 0, 4096); 
     
     extern uint64_t *kernel_pagetable;
     for (int i = 0; i < 512; i++) {
@@ -267,8 +354,6 @@ int exec(const char *path, char *const argv[], uint64_t *out_argc, uint64_t *out
     load_elf_map(user_pagetable, elf_buf);
     kfree(elf_buf);
 
-    // 【核心修复1】：强行规定用户的虚拟栈顶为 0x7F000000（保证 4KB 绝对页对齐）
-    // 这能让物理偏移和虚拟偏移完美匹配！
     uint64_t ustack_top = 0x7F000000; 
     uint64_t ustack_bottom = ustack_top - 4096;
     uint64_t stack_pa = (uint64_t)pmm_alloc_frame();
@@ -285,7 +370,7 @@ int exec(const char *path, char *const argv[], uint64_t *out_argc, uint64_t *out
     for (int i = argc - 1; i >= 0; i--) {
         int len = 0;
         while(argv[i][len]) len++;
-        len++; // 包含 '\0'
+        len++; 
 
         sp -= len;
         char *p = (char *)(stack_pa + (sp - ustack_bottom));
@@ -296,7 +381,7 @@ int exec(const char *path, char *const argv[], uint64_t *out_argc, uint64_t *out
     sp &= ~7ULL;
     sp -= (argc + 1) * sizeof(uint64_t);
     uint64_t *p_argv = (uint64_t *)(stack_pa + (sp - ustack_bottom));
-    for (int i = 0; i < argc; i++) {
+    for (uint64_t i = 0; i < argc; i++) {
         p_argv[i] = user_argv_addrs[i];
     }
     p_argv[argc] = 0;
