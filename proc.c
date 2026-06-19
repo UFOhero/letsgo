@@ -182,7 +182,14 @@ int wait(int pid, int *status) {
             have_kids = 1;
             if (procs[i].state == ZOMBIE) {
                 int ret_pid = procs[i].pid;
-                if (status) *status = procs[i].exit_code;
+                if (status) {
+                    // 【核心防御】：防止上下文切换导致的 SUM 位丢失！
+                    // 在对用户内存 (*status) 进行写操作的瞬间，强制重新开启 SUM 位。
+                    uint64_t old_sstatus = r_sstatus();
+                    w_sstatus(old_sstatus | (1ULL << 18));
+                    *status = procs[i].exit_code;
+                    w_sstatus(old_sstatus);
+                }
                 procs[i].state = UNUSED;
                 return ret_pid;
             }
@@ -238,7 +245,7 @@ uint64_t* clone_user_pagetable(uint64_t *parent_pt) {
 }
 
 // -------------------------------------------------------------
-// 【核心修复】：上下文快照捕获，解决 C 语言 Epilogue 丢失问题
+// 【重归稳健】：启用类似于 setjmp 的汇编快照，防止子进程丢毁 C 函数栈帧！
 // -------------------------------------------------------------
 asm(
     ".text\n"
@@ -258,71 +265,63 @@ asm(
     "sd s9, 88(a0)\n"
     "sd s10, 96(a0)\n"
     "sd s11, 104(a0)\n"
-    "li a0, 0\n"       // 父进程在此返回 0
+    "li a0, 0\n"       // 重点：当由 capture_context 直接返回时，返回值为 0。
     "ret\n"
 );
 extern uint64 capture_context(uint64 *ctx);
 
 int fork(void) {
-    struct proc *np;
-    uint64 ra, sp;
-    uint64 s_regs[12];
-
-    asm volatile("mv %0, ra" : "=r"(ra));
-    asm volatile("mv %0, sp" : "=r"(sp));
-    np = allocproc();
+    struct proc *np = allocproc();
     if(np == 0) return -1;
 
-    np->pagetable = current->pagetable;
+    if (current->pagetable) {
+        np->pagetable = clone_user_pagetable((uint64_t*)current->pagetable);
+    } else {
+        np->pagetable = 0;
+    }
     np->ustack = current->ustack;
     np->entry = current->entry;
 
-    asm volatile("mv %0, s0"  : "=r"(s_regs[0]));
-    asm volatile("mv %0, s1"  : "=r"(s_regs[1]));
-    asm volatile("mv %0, s2"  : "=r"(s_regs[2]));
-    asm volatile("mv %0, s3"  : "=r"(s_regs[3]));
-    asm volatile("mv %0, s4"  : "=r"(s_regs[4]));
-    asm volatile("mv %0, s5"  : "=r"(s_regs[5]));
-    asm volatile("mv %0, s6"  : "=r"(s_regs[6]));
-    asm volatile("mv %0, s7"  : "=r"(s_regs[7]));
-    asm volatile("mv %0, s8"  : "=r"(s_regs[8]));
-    asm volatile("mv %0, s9"  : "=r"(s_regs[9]));
-    asm volatile("mv %0, s10" : "=r"(s_regs[10]));
-    asm volatile("mv %0, s11" : "=r"(s_regs[11]));
+    uint64 p_base = current->kstack - 8192;
+    uint64 p_top  = current->kstack;
+    uint64 c_top  = np->kstack;
 
-    uint64 parent_base = current->kstack - 8192;
-    uint64 parent_top = current->kstack;
-    uint64 child_top = np->kstack;
-
-    uint64 *parent_stack = (uint64 *)parent_base;
-    uint64 *child_stack = (uint64 *)(np->kstack - 8192);
-    
-    // 【深度修复】：遍历子进程栈，重写所有的帧指针！彻底切断与父进程的孽缘！
+    // 完整拷贝内核栈
+    uint64 *parent_stack = (uint64 *)p_base;
+    uint64 *child_stack = (uint64 *)(c_top - 8192);
     for(uint64 i = 0; i < 8192UL / sizeof(uint64); i++) {
-        uint64 val = parent_stack[i];
-        if (val >= parent_base && val <= parent_top) {
-            val = child_top - (parent_top - val); // 地址重定向到子栈
-        }
-        child_stack[i] = val;
+        child_stack[i] = parent_stack[i];
     }
 
-    for(int i = 0; i < 32; i++) np->context[i] = 0;
-    np->context[0] = ra;
-    uint64 offset = parent_top - sp;
-    np->context[1] = child_top - offset;
-    
-    for(int i = 0; i < 12; i++) {
-        uint64 val = s_regs[i];
-        if (val >= parent_base && val <= parent_top) {
-            val = child_top - (parent_top - val);
+    // 捕捉当前函数状态
+    if (capture_context(np->context) == 0) {
+        // --- 这里是父进程 ---
+        
+        // 1. 重写子进程 context 中的所有保存寄存器（修复内部指针偏移）
+        for (int i = 1; i <= 13; i++) {
+            uint64 val = np->context[i];
+            if (val >= p_base && val <= p_top) {
+                np->context[i] = c_top - (p_top - val);
+            }
         }
-        np->context[2 + i] = val;
+
+        // 2. 深度重写子进程的内核栈数据，消除指向父栈的隐形毒药
+        for (uint64 i = 0; i < 8192UL / sizeof(uint64); i++) {
+            uint64 val = child_stack[i];
+            if (val >= p_base && val <= p_top) {
+                child_stack[i] = c_top - (p_top - val);
+            }
+        }
+
+        np->state = RUNNABLE;
+        np->parent = current;
+        return np->pid;
+    } else {
+        // --- 这里是子进程 ---
+        // 子进程通过 swtch 苏醒后，其 a0 (返回值) 并非为 0。
+        // 它会跳入这里并执行 return 0，从而安全执行完整的函数退栈指令（Epilogue），绝不会再引发内核跑飞！
+        return 0; 
     }
-    
-    np->context[14] = 0;
-    np->state = RUNNABLE;
-    np->parent = current;
-    return np->pid;
 }
 
 int exec(const char *path, char *const argv[], uint64_t *out_argc, uint64_t *out_argv) {
@@ -378,10 +377,14 @@ int exec(const char *path, char *const argv[], uint64_t *out_argc, uint64_t *out
         user_argv_addrs[i] = sp;
     }
 
-    sp &= ~7ULL;
+    // 【极其核心】：RISC-V 规定 sp 必须严格保证 16 字节对齐！
+    // 否则程序入栈时极大概率越过 0x7F000000 的上边界，直接导致 0x7f000008 缺页崩溃！
+    sp &= ~15ULL; 
     sp -= (argc + 1) * sizeof(uint64_t);
+    sp &= ~15ULL; // 减去数组大小后，再次强制 16 字节对齐护航
+
     uint64_t *p_argv = (uint64_t *)(stack_pa + (sp - ustack_bottom));
-    for (uint64_t i = 0; i < argc; i++) {
+    for (int i = 0; i < argc; i++) {
         p_argv[i] = user_argv_addrs[i];
     }
     p_argv[argc] = 0;
