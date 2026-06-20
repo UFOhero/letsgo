@@ -10,6 +10,9 @@ extern int printf(const char *fmt, ...);
 extern volatile int switch_to_user;
 extern uint64_t user_satp;
 
+extern void do_ps(void);
+extern int do_kill(int pid);
+
 static uint64_t sys_write(uint64_t fd, const char *buf, uint64_t count) {
     // 1. 让 VFS (虚拟文件系统) 接管真正的写入逻辑！
     // 如果你在 Shell 里执行了 '>'，此时 fd 1 已经指向了文件，这里就会把数据写入文件。
@@ -175,11 +178,19 @@ void handle_syscall(struct trapframe *tf) {
         case SYS_get_tick:
             ret_val = sys_get_tick();
             break;
+        case SYS_ps:
+            do_ps();
+            ret_val = 0;
+            break;
+        case SYS_kill:
+            ret_val = do_kill((int)tf->a0);
+            break;    
         default:
             printf("[Syscall] Unknown Syscall ID: %ld\n", syscall_num);
             ret_val = -1;
             break;
     }
+    w_sstatus(current_sstatus);
     tf->a0 = ret_val;
 }
 

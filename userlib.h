@@ -24,4 +24,7 @@ int dup2(int oldfd, int newfd);
 uint64_t get_tick(void);
 size_t strlen(const char *s);
 
+int ps(void);
+int kill(int pid);
+
 #endif

@@ -99,3 +99,19 @@ uint64_t get_tick(void) {
     asm volatile("ecall" : "=r"(a0) : "r"(a7) : "memory");
     return a0;
 }
+
+// userlib.c 中
+
+int ps(void) {
+    register uint64_t a0 asm("a0");
+    register uint64_t a7 asm("a7") = SYS_ps;
+    asm volatile("ecall" : "=r"(a0) : "r"(a7) : "memory");
+    return a0;
+}
+
+int kill(int pid) {
+    register uint64_t a0 asm("a0") = pid;
+    register uint64_t a7 asm("a7") = SYS_kill;
+    asm volatile("ecall" : "+r"(a0) : "r"(a7) : "memory");
+    return a0;
+}

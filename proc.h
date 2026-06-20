@@ -85,4 +85,7 @@ void uart_puts(const char *str);
 int printf(const char *fmt, ...);
 int exec(const char *path, char *const argv[], uint64_t *out_argc, uint64_t *out_argv);
 
+void do_ps(void);
+int do_kill(int pid);
+
 #endif
