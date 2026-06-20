@@ -319,6 +319,20 @@ int fs_dup2(int oldfd, int newfd) {
 // 创建测试文件（内嵌 ELF 数据将在 userlib.c 中提供）
 extern unsigned char hello_elf[], ls_elf[], cat_elf[], echo_elf[], null_elf[];
 extern unsigned int hello_elf_len, ls_elf_len, cat_elf_len, echo_elf_len, null_elf_len;
+extern unsigned char test_boot_elf[], test_intr_elf[], test_mem_elf[];
+extern unsigned char test_proc_elf[], test_fs_elf[], test_exec_elf[];
+extern unsigned int test_boot_elf_len, test_intr_elf_len, test_mem_elf_len;
+extern unsigned int test_proc_elf_len, test_fs_elf_len, test_exec_elf_len;
+
+static void install_user_program(const char *path, unsigned char *elf, unsigned int len) {
+    int fd = fs_open(path, O_RDWR | O_CREAT | O_TRUNC);
+    if (fd >= 0) {
+        fs_write(fd, elf, len);
+        fs_close(fd);
+    } else {
+        printf("[create_user_files] failed to install %s\n", path);
+    }
+}
 
 void create_user_files(void) {
     int fd;
@@ -326,14 +340,19 @@ void create_user_files(void) {
     if (fd >= 0) { fs_write(fd, "Hello, world!\n", 14); fs_close(fd); }
     fs_mkdir("/bin");
     fs_mkdir("/tmp");
-    fd = fs_open("/bin/hello", O_RDWR | O_CREAT);
-    if (fd >= 0) { fs_write(fd, hello_elf, hello_elf_len); fs_close(fd); }
-    fd = fs_open("/bin/ls", O_RDWR | O_CREAT);
-    if (fd >= 0) { fs_write(fd, ls_elf, ls_elf_len); fs_close(fd); }
-    fd = fs_open("/bin/cat", O_RDWR | O_CREAT);
-    if (fd >= 0) { fs_write(fd, cat_elf, cat_elf_len); fs_close(fd); }
-    fd = fs_open("/bin/echo", O_RDWR | O_CREAT);
-    if (fd >= 0) { fs_write(fd, echo_elf, echo_elf_len); fs_close(fd); }
-    fd = fs_open("/bin/null", O_RDWR | O_CREAT);
-    if (fd >= 0) { fs_write(fd, null_elf, null_elf_len); fs_close(fd); }
+
+    printf("[Init] Installing user programs into /bin...\n");
+    install_user_program("/bin/hello", hello_elf, hello_elf_len);
+    install_user_program("/bin/ls", ls_elf, ls_elf_len);
+    install_user_program("/bin/cat", cat_elf, cat_elf_len);
+    install_user_program("/bin/echo", echo_elf, echo_elf_len);
+    install_user_program("/bin/null", null_elf, null_elf_len);
+
+    printf("[Init] Installing test programs into /bin...\n");
+    install_user_program("/bin/test_boot", test_boot_elf, test_boot_elf_len);
+    install_user_program("/bin/test_intr", test_intr_elf, test_intr_elf_len);
+    install_user_program("/bin/test_mem", test_mem_elf, test_mem_elf_len);
+    install_user_program("/bin/test_proc", test_proc_elf, test_proc_elf_len);
+    install_user_program("/bin/test_fs", test_fs_elf, test_fs_elf_len);
+    install_user_program("/bin/test_exec", test_exec_elf, test_exec_elf_len);
 }

@@ -13,10 +13,11 @@ KERNEL_OBJS = start.o kernel.o uart.o plic.o timer.o sbi.o \
               proc.o swtch.o elf.o fs.o
 
 USER_DIR = user
-USER_SRCS = $(wildcard $(USER_DIR)/*.c)
+USER_SRCS = $(filter-out $(USER_DIR)/%_array.c,$(wildcard $(USER_DIR)/*.c))
 USER_ELFS = $(USER_SRCS:.c=.elf)
 USER_ARRAY_C = $(USER_SRCS:.c=_array.c)
 USER_ARRAY_O = $(USER_SRCS:.c=_array.o)
+USER_HDRS = userlib.h syscall.h $(USER_DIR)/testlib.h
 
 KERNEL_OBJS += $(USER_ARRAY_O)
 
@@ -32,7 +33,7 @@ kernel.elf: $(KERNEL_OBJS) link.ld
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # 构建用户程序 ELF
-$(USER_DIR)/%.elf: $(USER_DIR)/%.c userlib.o user.ld
+$(USER_DIR)/%.elf: $(USER_DIR)/%.c userlib.o user.ld $(USER_HDRS)
 	@mkdir -p $(USER_DIR)
 	$(CC) $(CFLAGS) -I. -c $< -o $(basename $@).o
 	$(LD) -T user.ld -o $@ $(basename $@).o userlib.o
@@ -49,7 +50,7 @@ $(USER_DIR)/%_array.c: $(USER_DIR)/%.elf
 $(USER_DIR)/%_array.o: $(USER_DIR)/%_array.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-run: kernel.elf
+run: all
 	qemu-system-riscv64 -machine virt -nographic -m 256M -kernel kernel.elf
 
 clean:

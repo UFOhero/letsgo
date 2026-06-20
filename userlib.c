@@ -45,7 +45,7 @@ int exec(const char *path, char *const argv[]) {
 void exit(int status) {
     register uint64_t a0 asm("a0") = status;
     register uint64_t a7 asm("a7") = SYS_exit;
-    asm volatile("ecall" : : "r"(a0), "r"(a7) : "memory");
+    asm volatile("ecall" : "+r"(a0) : "r"(a7) : "memory");
     while(1);
 }
 
@@ -90,5 +90,12 @@ int wait(int pid, int *status) {
     register uint64_t a1 asm("a1") = (uint64_t)status;
     register uint64_t a7 asm("a7") = SYS_wait;
     asm volatile("ecall" : "+r"(a0) : "r"(a1), "r"(a7) : "memory");
+    return a0;
+}
+
+uint64_t get_tick(void) {
+    register uint64_t a0 asm("a0");
+    register uint64_t a7 asm("a7") = SYS_get_tick;
+    asm volatile("ecall" : "=r"(a0) : "r"(a7) : "memory");
     return a0;
 }

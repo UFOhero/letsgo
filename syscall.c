@@ -69,17 +69,19 @@ static uint64_t sys_readdir(uint64_t fd, char *name) {
 }
 
 static uint64_t sys_exec(const char *path, char *const argv[], struct trapframe *tf) {
-    int ret = exec(path, argv, NULL, NULL);
+    uint64_t u_argc = 0, u_argv = 0;
+    int ret = exec(path, argv, &u_argc, &u_argv);
     if (ret == 0) {
         // 设置 trapframe 以返回用户态
         tf->sepc = current->entry;
         tf->sstatus = (tf->sstatus & ~SSTATUS_SPP) | 0; // SPP = 0 (User)
         tf->sp = current->ustack;
+        tf->a1 = u_argv;
         // 通知 trap_vec.S 切换页表
         user_satp = MAKE_SATP(current->pagetable);
         switch_to_user = 1;
         
-        return 0;
+        return u_argc;
     }
     return ret;
 }

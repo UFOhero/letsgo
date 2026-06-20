@@ -129,7 +129,10 @@ void yield(void) {
         extern volatile int switch_to_user;
         extern uint64_t user_satp;
         user_satp = MAKE_SATP(current->pagetable);
-        switch_to_user = 1;
+        switch_to_user = 0;
+        asm volatile("csrw satp, %0" : : "r"(user_satp));
+        asm volatile("sfence.vma zero, zero");
+        w_sstatus(r_sstatus() | SSTATUS_SIE | SSTATUS_SUM);
     } else {
         extern uint64_t *kernel_pagetable;
         uint64_t satp = MAKE_SATP(kernel_pagetable);

@@ -1,6 +1,7 @@
 #ifndef USERLIB_H
 #define USERLIB_H
 #include <stddef.h>
+#include <stdint.h>
 
 #define O_RDONLY    0x01
 #define O_WRONLY    0x02
@@ -20,6 +21,7 @@ int wait(int pid, int *status);
 int opendir(const char *path);
 int readdir(int fd, char *name);
 int dup2(int oldfd, int newfd);
+uint64_t get_tick(void);
 size_t strlen(const char *s);
 
 #endif
