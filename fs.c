@@ -336,6 +336,12 @@ extern unsigned int test_boot_elf_len, test_intr_elf_len, test_mem_elf_len;
 extern unsigned int test_proc_elf_len, test_fs_elf_len, test_exec_elf_len;
 extern unsigned int test_sched_elf_len;
 
+extern unsigned char ps_elf[];
+extern unsigned int ps_elf_len;
+
+extern unsigned char kill_elf[];
+extern unsigned int kill_elf_len;
+
 static void install_user_program(const char *path, unsigned char *elf, unsigned int len) {
     int fd = fs_open(path, O_RDWR | O_CREAT | O_TRUNC);
     if (fd >= 0) {
@@ -368,4 +374,7 @@ void create_user_files(void) {
     install_user_program("/bin/test_fs", test_fs_elf, test_fs_elf_len);
     install_user_program("/bin/test_exec", test_exec_elf, test_exec_elf_len);
     install_user_program("/bin/test_sched", test_sched_elf, test_sched_elf_len);
+
+    install_user_program("/bin/ps", ps_elf, ps_elf_len);
+    install_user_program("/bin/kill", kill_elf, kill_elf_len);
 }

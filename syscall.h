@@ -59,6 +59,8 @@ struct trapframe {
 #define SYS_unlink    17
 #define SYS_get_trap_count 18
 #define SYS_get_sched_info 19
+#define SYS_ps        20
+#define SYS_kill      21
 
 void handle_syscall(struct trapframe *tf);
 #endif

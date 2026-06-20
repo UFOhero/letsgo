@@ -34,4 +34,7 @@ int get_sched_info(int *algorithm, int *pid, int *priority, uint64_t *slice, int
 void yield_cpu(void);
 size_t strlen(const char *s);
 
+int ps(void);
+int kill(int pid);
+
 #endif
