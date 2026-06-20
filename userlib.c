@@ -1,6 +1,20 @@
 #include "userlib.h"
 #include "syscall.h"
 
+// Default C runtime entry for user programs that define main() instead of _start().
+// Files that provide their own strong _start override this weak symbol.
+__attribute__((weak)) int main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    return 0;
+}
+
+__attribute__((weak, section(".text.entry")))
+void _start(int argc, char **argv) {
+    int status = main(argc, argv);
+    exit(status);
+}
+
 int write(int fd, const void *buf, int count) {
     register uint64_t a0 asm("a0") = fd;
     register uint64_t a1 asm("a1") = (uint64_t)buf;
@@ -127,6 +141,17 @@ uint64_t get_trap_count(int type) {
     register uint64_t a0 asm("a0") = type;
     register uint64_t a7 asm("a7") = SYS_get_trap_count;
     asm volatile("ecall" : "+r"(a0) : "r"(a7) : "memory");
+    return a0;
+}
+
+int get_sched_info(int *algorithm, int *pid, int *priority, uint64_t *slice, int *need_resched_out) {
+    register uint64_t a0 asm("a0") = (uint64_t)algorithm;
+    register uint64_t a1 asm("a1") = (uint64_t)pid;
+    register uint64_t a2 asm("a2") = (uint64_t)priority;
+    register uint64_t a3 asm("a3") = (uint64_t)slice;
+    register uint64_t a4 asm("a4") = (uint64_t)need_resched_out;
+    register uint64_t a7 asm("a7") = SYS_get_sched_info;
+    asm volatile("ecall" : "+r"(a0) : "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a7) : "memory");
     return a0;
 }
 

@@ -10,6 +10,11 @@ extern int printf(const char *fmt, ...);
 extern volatile int switch_to_user;
 extern uint64_t user_satp;
 
+volatile uint64_t trap_timer_count __attribute__((weak));
+volatile uint64_t trap_uart_count __attribute__((weak));
+volatile uint64_t trap_syscall_count __attribute__((weak));
+volatile uint64_t trap_page_fault_count __attribute__((weak));
+
 static uint64_t sys_write(uint64_t fd, const char *buf, uint64_t count) {
     // 1. 让 VFS (虚拟文件系统) 接管真正的写入逻辑！
     // 如果你在 Shell 里执行了 '>'，此时 fd 1 已经指向了文件，这里就会把数据写入文件。
@@ -166,6 +171,20 @@ static uint64_t sys_get_trap_count(uint64_t type) {
     }
 }
 
+static uint64_t sys_get_sched_info(int *algorithm, int *pid, int *priority,
+                                   uint64_t *slice, int *need_resched_out) {
+    extern int sched_algorithm;
+    extern volatile int need_resched;
+
+    if (!current) return -1;
+    if (algorithm) *algorithm = sched_algorithm;
+    if (pid) *pid = (int)current->pid;
+    if (priority) *priority = current->priority;
+    if (slice) *slice = current->slice;
+    if (need_resched_out) *need_resched_out = need_resched;
+    return 0;
+}
+
 static uint64_t sys_yield(void) {
     yield();
     return 0;
@@ -233,6 +252,10 @@ void handle_syscall(struct trapframe *tf) {
             break;
         case SYS_get_trap_count:
             ret_val = sys_get_trap_count(tf->a0);
+            break;
+        case SYS_get_sched_info:
+            ret_val = sys_get_sched_info((int *)tf->a0, (int *)tf->a1, (int *)tf->a2,
+                                         (uint64_t *)tf->a3, (int *)tf->a4);
             break;
         default:
             printf("[Syscall] Unknown Syscall ID: %ld\n", syscall_num);

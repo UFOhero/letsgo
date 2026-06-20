@@ -58,6 +58,7 @@ struct trapframe {
 #define SYS_mkdir     16
 #define SYS_unlink    17
 #define SYS_get_trap_count 18
+#define SYS_get_sched_info 19
 
 void handle_syscall(struct trapframe *tf);
 #endif

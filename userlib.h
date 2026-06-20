@@ -30,6 +30,7 @@ int mkdir(const char *path);
 int unlink(const char *path);
 uint64_t get_tick(void);
 uint64_t get_trap_count(int type);
+int get_sched_info(int *algorithm, int *pid, int *priority, uint64_t *slice, int *need_resched);
 void yield_cpu(void);
 size_t strlen(const char *s);
 

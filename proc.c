@@ -111,8 +111,6 @@ struct proc* scheduler(void) {
 }
 
 void yield(void) {
-    need_resched = 0;
-
     struct proc *next = scheduler();
     if (next == 0 || next == current) return;
     struct proc *prev = current;
@@ -120,7 +118,7 @@ void yield(void) {
     if (prev && prev->state == RUNNING) {
         prev->state = RUNNABLE;
         prev->enq_time = enq_clock++;
-        if(sched_algorithm == 2) {
+        if(sched_algorithm == 2 && !need_resched) {
             if(prev->priority > 0) prev->priority--;
             prev->slice = 1;
         }
@@ -490,4 +488,49 @@ void proc_init(void) {
             : : "r"(current->context) : "memory"
         );
     }
+}
+
+void do_ps(void) {
+    printf("PID\tSTATE\t\tPRIORITY\n");
+    for (int i = 0; i < NPROC; i++) {
+        struct proc *p = &procs[i];
+        if (p->state != UNUSED) {
+            char *state_str = "UNKNOWN";
+            switch(p->state) {
+                case RUNNABLE: state_str = "RUNNABLE"; break;
+                case RUNNING:  state_str = "RUNNING "; break;
+                case BLOCKED:  state_str = "BLOCKED "; break;
+                case ZOMBIE:   state_str = "ZOMBIE  "; break;
+                default:       break;
+            }
+            // 打印进程的 PID、状态 和 优先级
+            printf("%d\t%s\t%d\n", p->pid, state_str, p->priority);
+        }
+    }
+}
+
+// 实现 kill 逻辑：根据 PID 强制结束进程
+int do_kill(int pid) {
+    if (pid < 0) return -1;
+
+    for (int i = 0; i < NPROC; i++) {
+        struct proc *p = &procs[i];
+        if (p->pid != (uint64)pid || p->state == UNUSED) continue;
+
+        // Do not kill kernel-only processes such as the shell/idle task.
+        // Also do not let the kill utility kill itself; it must return to shell.
+        if (p->pagetable == 0 || p == current) return -1;
+
+        p->exit_code = -9;
+        p->state = ZOMBIE;
+
+        // Match the important side effects of exit(): wake the waiter and
+        // detach children so the killed process is no longer schedulable.
+        wakeup(p->parent);
+        for (int j = 0; j < NPROC; j++) {
+            if (procs[j].parent == p) procs[j].parent = 0;
+        }
+        return 0;
+    }
+    return -1;
 }
