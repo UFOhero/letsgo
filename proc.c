@@ -111,6 +111,8 @@ struct proc* scheduler(void) {
 }
 
 void yield(void) {
+    need_resched = 0;
+
     struct proc *next = scheduler();
     if (next == 0 || next == current) return;
     struct proc *prev = current;
@@ -118,7 +120,7 @@ void yield(void) {
     if (prev && prev->state == RUNNING) {
         prev->state = RUNNABLE;
         prev->enq_time = enq_clock++;
-        if(sched_algorithm == 2 && !need_resched) {
+        if(sched_algorithm == 2) {
             if(prev->priority > 0) prev->priority--;
             prev->slice = 1;
         }
@@ -488,42 +490,4 @@ void proc_init(void) {
             : : "r"(current->context) : "memory"
         );
     }
-}
-
-void do_ps(void) {
-    printf("PID\tSTATE\t\tPRIORITY\n");
-    for (int i = 0; i < NPROC; i++) {
-        struct proc *p = &procs[i];
-        if (p->state != UNUSED) {
-            char *state_str = "UNKNOWN";
-            switch(p->state) {
-                case RUNNABLE: state_str = "RUNNABLE"; break;
-                case RUNNING:  state_str = "RUNNING "; break;
-                case BLOCKED:  state_str = "BLOCKED "; break;
-                case ZOMBIE:   state_str = "ZOMBIE  "; break;
-                default:       break;
-            }
-            // 打印进程的 PID、状态 和 优先级
-            printf("%d\t%s\t%d\n", p->pid, state_str, p->priority);
-        }
-    }
-}
-
-// 实现 kill 逻辑：根据 PID 强制结束进程
-int do_kill(int pid) {
-    // 保护机制：PID 0 (idle/内核进程) 和 PID 1 (init/shell) 不允许被 kill
-    if (pid <= 1) {
-        return -1; 
-    }
-    
-    for (int i = 0; i < NPROC; i++) {
-        struct proc *p = &procs[i];
-        if (p->pid == pid && p->state != UNUSED) {
-            // 直接将其状态修改为 ZOMBIE (僵尸状态)，它将不会再被调度执行。
-            // 它的父进程（如 shell）随后可以通过 wait() 回收它。
-            p->state = ZOMBIE;
-            return 0; // 成功
-        }
-    }
-    return -1; // 找不到对应的 PID
 }

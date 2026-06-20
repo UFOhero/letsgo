@@ -14,6 +14,11 @@ extern uint32_t plic_claim(void);
 extern void plic_complete(uint32_t irq);
 extern char uart_getc(void);
 
+volatile uint64_t trap_timer_count = 0;
+volatile uint64_t trap_uart_count = 0;
+volatile uint64_t trap_syscall_count = 0;
+volatile uint64_t trap_page_fault_count = 0;
+
 void trap_init(void) {
     w_stvec((uint64_t)trap_vector);
     printf("[Init] Trap vectors loaded at 0x%lx\n", (uint64_t)trap_vector);
@@ -32,12 +37,14 @@ void trap_handler(struct trapframe *tf) {
     if (is_interrupt) {
         switch (cause_code) {
             case 5:
+                trap_timer_count++;
                 sched_tick();
                 timer_set_next();
                 break;
             case 9: {
                 uint32_t irq = plic_claim();
                 if (irq == 10) {
+                    trap_uart_count++;
                     extern void uart_intr(void);
                     uart_intr();
                 }
@@ -56,6 +63,7 @@ void trap_handler(struct trapframe *tf) {
                 break;
             case 3:
             {
+                trap_syscall_count++;
                 uint64_t old_sepc = tf->sepc;
                 handle_syscall(tf);
                 if (tf->sepc == old_sepc) tf->sepc += 2;
@@ -71,6 +79,7 @@ void trap_handler(struct trapframe *tf) {
             case 8:
             case 9:
             {
+                trap_syscall_count++;
                 uint64_t old_sepc = tf->sepc;
                 handle_syscall(tf);
                 if (tf->sepc == old_sepc) tf->sepc += 4;
@@ -80,6 +89,7 @@ void trap_handler(struct trapframe *tf) {
             case 13: // Load Page Fault
             case 15: // Store/AMO Page Fault
             {
+                trap_page_fault_count++;
                 uint64_t fault_addr = r_stval();
                 uint64_t sstatus = r_sstatus();
                 int from_user = !(sstatus & SSTATUS_SPP);

@@ -49,16 +49,16 @@ static int dir_lookup(int dir_inode, const char *name) {
     int num = inode_table[dir_inode].size / sizeof(dir_entry_t);
     dir_entry_t *entries = (dir_entry_t *)(data_buf + inode_table[dir_inode].data_offset);
     for (int i = 0; i < num; i++) {
-        if (strncmp(entries[i].name, name, MAX_FILENAME) == 0)
+        int ino = entries[i].inode;
+        if (ino >= 0 && ino < MAX_INODES && inode_table[ino].used &&
+            strncmp(entries[i].name, name, MAX_FILENAME) == 0)
             return entries[i].inode;
     }
     return -1;
 }
 
 int fs_resolve_path(const char *path, int *out_inode) {
-    printf("[resolve] path='%s', current_cwd=%d\n", path, current_cwd);
     if (!path || !out_inode) {
-        printf("[resolve] null argument\n");
         return -1;
     }
     int cur;
@@ -68,26 +68,21 @@ int fs_resolve_path(const char *path, int *out_inode) {
     char tmp[256];
     strncpy(tmp, p, 255);
     tmp[255] = 0;
-    printf("[resolve] copy to tmp='%s'\n", tmp);
     char *token = strtok(tmp, "/");
     while (token) {
-        printf("[resolve] token='%s', cur=%d, ino type=%d\n", token, cur, inode_table[cur].type);
         if (cur < 0 || inode_table[cur].type != INODE_DIR) {
-            printf("[resolve] bad cur\n");
             return -1;
         }
         if (strcmp(token, ".") == 0) { }
         else if (strcmp(token, "..") == 0) {
             int parent = dir_lookup(cur, "..");
             if (parent < 0) {
-                printf("[resolve] .. not found\n");
                 return -1;
             }
             cur = parent;
         } else {
             int next = dir_lookup(cur, token);
             if (next < 0) {
-                printf("[resolve] lookup '%s' failed\n", token);
                 return -1;
             }
             cur = next;
@@ -95,7 +90,6 @@ int fs_resolve_path(const char *path, int *out_inode) {
         token = strtok(NULL, "/");
     }
     *out_inode = cur;
-    printf("[resolve] success, out_inode=%d\n", cur);
     return 0;
 }
 
@@ -146,6 +140,9 @@ int fs_open(const char *path, int flags) {
             inode_num = new_inode;
         } else return -1;
     } else {
+        if (!inode_table[inode_num].used || inode_table[inode_num].type != INODE_FILE) {
+            return -1;
+        }
         // 【核心修复】：文件已存在，如果带有 O_TRUNC 标志且为写入模式，将文件大小截断为 0
         if ((flags & O_TRUNC) && (flags & (O_WRONLY | O_RDWR))) {
             inode_table[inode_num].size = 0;
@@ -177,7 +174,23 @@ int fs_close(int fd) {
 int fs_read(int fd, void *buf, int count) {
     if (fd < 0 || fd >= MAX_FD || !current_fd_table[fd].valid) return -1;
     file_desc_t *f = &current_fd_table[fd];
-    if (f->inode == TERMINAL_INODE) return 0; // 终端读由 sys_read 处理
+    
+    // 【核心修复 1】：将终端读操作接入 VFS，并支持 Ctrl+D 作为 EOF
+    if (f->inode == TERMINAL_INODE) {
+        extern char uart_getc_blocking(void);
+        if (count > 0) {
+            char c = uart_getc_blocking();
+            // 0x04 是 Ctrl+D 的 ASCII 码，代表 End of Transmission (EOF)
+            if (c == 0x04) {
+                return 0; // 返回 0，代表文件读完了，cat 接收到 0 就会退出循环
+            }
+            ((char*)buf)[0] = c;
+            return 1;
+        }
+        return 0; 
+    }
+    
+    // 以下是原来的读取文件的逻辑，保持不变
     inode_t *ino = &inode_table[f->inode];
     if (ino->type != INODE_FILE) return -1;
     if (f->offset >= ino->size) return 0;
@@ -213,7 +226,9 @@ int fs_write(int fd, const void *buf, int count) {
 int fs_lseek(int fd, int offset, int whence) {
     if (fd < 0 || fd >= MAX_FD || !current_fd_table[fd].valid) return -1;
     file_desc_t *f = &current_fd_table[fd];
+    if (f->inode < 0 || f->inode >= MAX_INODES) return -1;
     inode_t *ino = &inode_table[f->inode];
+    if (ino->type != INODE_FILE) return -1;
     switch (whence) {
         case 0: f->offset = offset; break;
         case 1: f->offset += offset; break;
@@ -261,13 +276,10 @@ int fs_unlink(const char *path) {
 int fs_opendir(const char *path) {
     int ino;
     int res = fs_resolve_path(path, &ino);
-    printf("[fs_opendir] resolve '%s' -> ino=%d, ret=%d\n", path, ino, res);
     if (res != 0) {
-        printf("[fs_opendir] resolve failed\n");
         return -1;
     }
     if (inode_table[ino].type != INODE_DIR) {
-        printf("[fs_opendir] ino %d not a dir (type=%d)\n", ino, inode_table[ino].type);
         return -1;
     }
     for (int i = 3; i < MAX_FD; i++) {
@@ -277,11 +289,9 @@ int fs_opendir(const char *path) {
             current_fd_table[i].flags = 0;
             current_fd_table[i].valid = 1;
             inode_table[ino].ref_count++;
-            printf("[fs_opendir] allocated fd %d\n", i);
             return i;
         }
     }
-    printf("[fs_opendir] no free fd!\n");
     return -1;
 }
 
@@ -321,14 +331,10 @@ extern unsigned char hello_elf[], ls_elf[], cat_elf[], echo_elf[], null_elf[];
 extern unsigned int hello_elf_len, ls_elf_len, cat_elf_len, echo_elf_len, null_elf_len;
 extern unsigned char test_boot_elf[], test_intr_elf[], test_mem_elf[];
 extern unsigned char test_proc_elf[], test_fs_elf[], test_exec_elf[];
+extern unsigned char test_sched_elf[];
 extern unsigned int test_boot_elf_len, test_intr_elf_len, test_mem_elf_len;
 extern unsigned int test_proc_elf_len, test_fs_elf_len, test_exec_elf_len;
-
-extern unsigned char ps_elf[];
-extern unsigned int ps_elf_len;
-
-extern unsigned char kill_elf[];
-extern unsigned int kill_elf_len;
+extern unsigned int test_sched_elf_len;
 
 static void install_user_program(const char *path, unsigned char *elf, unsigned int len) {
     int fd = fs_open(path, O_RDWR | O_CREAT | O_TRUNC);
@@ -361,6 +367,5 @@ void create_user_files(void) {
     install_user_program("/bin/test_proc", test_proc_elf, test_proc_elf_len);
     install_user_program("/bin/test_fs", test_fs_elf, test_fs_elf_len);
     install_user_program("/bin/test_exec", test_exec_elf, test_exec_elf_len);
-    install_user_program("/bin/ps", ps_elf, ps_elf_len);
-    install_user_program("/bin/kill", kill_elf, kill_elf_len);
+    install_user_program("/bin/test_sched", test_sched_elf, test_sched_elf_len);
 }

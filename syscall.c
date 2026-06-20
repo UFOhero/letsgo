@@ -10,9 +10,6 @@ extern int printf(const char *fmt, ...);
 extern volatile int switch_to_user;
 extern uint64_t user_satp;
 
-extern void do_ps(void);
-extern int do_kill(int pid);
-
 static uint64_t sys_write(uint64_t fd, const char *buf, uint64_t count) {
     // 1. 让 VFS (虚拟文件系统) 接管真正的写入逻辑！
     // 如果你在 Shell 里执行了 '>'，此时 fd 1 已经指向了文件，这里就会把数据写入文件。
@@ -41,15 +38,30 @@ static uint64_t sys_write(uint64_t fd, const char *buf, uint64_t count) {
 }
 
 static uint64_t sys_read(uint64_t fd, char *buf, uint64_t count) {
+    // 【核心修复 2】：优先让 VFS (虚拟文件系统) 接管真正的读取逻辑！
+    // 如果 fd 0 已经被 shell dup2 指向了管道文件，这里会自动去读取文件里的数据。
+    // 如果 fd 0 仍然是终端，上面的 fs_read 会代劳调用串口并拦截 Ctrl+D。
+    int ret = fs_read(fd, buf, count);
+    
+    // 如果 VFS 成功处理了（返回值 >= 0），无论是普通文件还是终端，直接返回
+    if (ret >= 0) {
+        return ret;
+    }
+
+    // 终极兼容性兜底 (Fallback)
+    // 万一系统极早期阶段 fd 0 没有被正确初始化为 TERMINAL_INODE，强行读串口防止变哑巴
     if (fd == 0) {
         extern char uart_getc_blocking(void);
         if (count > 0) {
-            buf[0] = uart_getc_blocking();
+            char c = uart_getc_blocking();
+            if (c == 0x04) return 0; // 兜底处同样支持 Ctrl+D
+            buf[0] = c;
             return 1;
         }
         return 0;
     }
-    return fs_read(fd, buf, count);
+    
+    return -1;
 }
 
 static uint64_t sys_open(const char *path, uint64_t flags) {
@@ -61,10 +73,7 @@ static uint64_t sys_close(uint64_t fd) {
 }
 
 static uint64_t sys_opendir(const char *path) {
-    printf("[sys_opendir] path=%s, addr=0x%lx\n", path, (uint64_t)path);
-    int ret = fs_opendir(path);
-    printf("[sys_opendir] returns %d\n", ret);
-    return ret;
+    return fs_opendir(path);
 }
 
 static uint64_t sys_readdir(uint64_t fd, char *name) {
@@ -98,6 +107,18 @@ static uint64_t sys_dup2(uint64_t oldfd, uint64_t newfd) {
     return fs_dup2(oldfd, newfd);
 }
 
+static uint64_t sys_lseek(uint64_t fd, uint64_t offset, uint64_t whence) {
+    return fs_lseek(fd, (int)offset, (int)whence);
+}
+
+static uint64_t sys_mkdir(const char *path) {
+    return fs_mkdir(path);
+}
+
+static uint64_t sys_unlink(const char *path) {
+    return fs_unlink(path);
+}
+
 static uint64_t sys_fork(struct trapframe *tf) {
     return fork_from_trap(tf);
 }
@@ -128,6 +149,26 @@ static uint64_t sys_wait(int pid, int *status) {
 
 static uint64_t sys_get_tick(void) {
     return r_time();
+}
+
+static uint64_t sys_get_trap_count(uint64_t type) {
+    extern volatile uint64_t trap_timer_count;
+    extern volatile uint64_t trap_uart_count;
+    extern volatile uint64_t trap_syscall_count;
+    extern volatile uint64_t trap_page_fault_count;
+
+    switch (type) {
+        case 0: return trap_timer_count;
+        case 1: return trap_uart_count;
+        case 2: return trap_syscall_count;
+        case 3: return trap_page_fault_count;
+        default: return (uint64_t)-1;
+    }
+}
+
+static uint64_t sys_yield(void) {
+    yield();
+    return 0;
 }
 
 void handle_syscall(struct trapframe *tf) {
@@ -178,19 +219,26 @@ void handle_syscall(struct trapframe *tf) {
         case SYS_get_tick:
             ret_val = sys_get_tick();
             break;
-        case SYS_ps:
-            do_ps();
-            ret_val = 0;
+        case SYS_yield:
+            ret_val = sys_yield();
             break;
-        case SYS_kill:
-            ret_val = do_kill((int)tf->a0);
-            break;    
+        case SYS_lseek:
+            ret_val = sys_lseek(tf->a0, tf->a1, tf->a2);
+            break;
+        case SYS_mkdir:
+            ret_val = sys_mkdir((const char *)tf->a0);
+            break;
+        case SYS_unlink:
+            ret_val = sys_unlink((const char *)tf->a0);
+            break;
+        case SYS_get_trap_count:
+            ret_val = sys_get_trap_count(tf->a0);
+            break;
         default:
             printf("[Syscall] Unknown Syscall ID: %ld\n", syscall_num);
             ret_val = -1;
             break;
     }
-    w_sstatus(current_sstatus);
     tf->a0 = ret_val;
 }
 

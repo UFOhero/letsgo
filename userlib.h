@@ -10,6 +10,10 @@
 #define O_TRUNC     0x08   // <--- 加在这里！分配下一个二进制位 0x08
 #define TERMINAL_INODE -1
 
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
 int write(int fd, const void *buf, int count);
 int read(int fd, void *buf, int count);
 int open(const char *path, int flags);
@@ -21,10 +25,12 @@ int wait(int pid, int *status);
 int opendir(const char *path);
 int readdir(int fd, char *name);
 int dup2(int oldfd, int newfd);
+int lseek(int fd, int offset, int whence);
+int mkdir(const char *path);
+int unlink(const char *path);
 uint64_t get_tick(void);
+uint64_t get_trap_count(int type);
+void yield_cpu(void);
 size_t strlen(const char *s);
-
-int ps(void);
-int kill(int pid);
 
 #endif

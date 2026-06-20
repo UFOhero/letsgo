@@ -72,6 +72,29 @@ int dup2(int oldfd, int newfd) {
     return a0;
 }
 
+int lseek(int fd, int offset, int whence) {
+    register uint64_t a0 asm("a0") = fd;
+    register uint64_t a1 asm("a1") = offset;
+    register uint64_t a2 asm("a2") = whence;
+    register uint64_t a7 asm("a7") = SYS_lseek;
+    asm volatile("ecall" : "+r"(a0) : "r"(a1), "r"(a2), "r"(a7) : "memory");
+    return a0;
+}
+
+int mkdir(const char *path) {
+    register uint64_t a0 asm("a0") = (uint64_t)path;
+    register uint64_t a7 asm("a7") = SYS_mkdir;
+    asm volatile("ecall" : "+r"(a0) : "r"(a7) : "memory");
+    return a0;
+}
+
+int unlink(const char *path) {
+    register uint64_t a0 asm("a0") = (uint64_t)path;
+    register uint64_t a7 asm("a7") = SYS_unlink;
+    asm volatile("ecall" : "+r"(a0) : "r"(a7) : "memory");
+    return a0;
+}
+
 size_t strlen(const char *s) {
     size_t len = 0;
     while (s[len]) len++;
@@ -100,18 +123,15 @@ uint64_t get_tick(void) {
     return a0;
 }
 
-// userlib.c 中
-
-int ps(void) {
-    register uint64_t a0 asm("a0");
-    register uint64_t a7 asm("a7") = SYS_ps;
-    asm volatile("ecall" : "=r"(a0) : "r"(a7) : "memory");
+uint64_t get_trap_count(int type) {
+    register uint64_t a0 asm("a0") = type;
+    register uint64_t a7 asm("a7") = SYS_get_trap_count;
+    asm volatile("ecall" : "+r"(a0) : "r"(a7) : "memory");
     return a0;
 }
 
-int kill(int pid) {
-    register uint64_t a0 asm("a0") = pid;
-    register uint64_t a7 asm("a7") = SYS_kill;
-    asm volatile("ecall" : "+r"(a0) : "r"(a7) : "memory");
-    return a0;
+void yield_cpu(void) {
+    register uint64_t a0 asm("a0");
+    register uint64_t a7 asm("a7") = SYS_yield;
+    asm volatile("ecall" : "=r"(a0) : "r"(a7) : "memory");
 }

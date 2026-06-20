@@ -53,8 +53,11 @@ struct trapframe {
 #define SYS_fork      11
 #define SYS_wait      12
 #define SYS_get_tick  13
-#define SYS_ps        14
-#define SYS_kill      15
+#define SYS_yield     14
+#define SYS_lseek     15
+#define SYS_mkdir     16
+#define SYS_unlink    17
+#define SYS_get_trap_count 18
 
 void handle_syscall(struct trapframe *tf);
 #endif
