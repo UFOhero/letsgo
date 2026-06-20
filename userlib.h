@@ -15,6 +15,8 @@ int open(const char *path, int flags);
 int close(int fd);
 int exec(const char *path, char *const argv[]);
 void exit(int status);
+int fork(void);
+int wait(int pid, int *status);
 int opendir(const char *path);
 int readdir(int fd, char *name);
 int dup2(int oldfd, int newfd);

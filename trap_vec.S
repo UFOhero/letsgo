@@ -1,7 +1,30 @@
 .global trap_vector
 .align 4
 
+.equ SSTATUS_SPP, 256
+
 trap_vector:
+    # If sscratch is non-zero, the trap came from U-mode and sscratch
+    # contains the current process kernel stack top. Swap to it.
+    # If sscratch is zero, this is an S-mode trap; restore the original sp
+    # and save the trapframe on the current kernel stack.
+    csrrw sp, sscratch, sp
+    bnez sp, 1f
+    csrrw sp, sscratch, sp
+    j 2f
+
+1:
+    addi sp, sp, -272
+    sd ra,   0*8(sp)
+    sd gp,   2*8(sp)
+    sd tp,   3*8(sp)
+    sd t0,   4*8(sp)
+    csrr t0, sscratch
+    sd t0,   1*8(sp)
+    csrw sscratch, zero
+    j 3f
+
+2:
     addi sp, sp, -272
     sd ra,   0*8(sp)
     sd gp,   2*8(sp)
@@ -9,6 +32,8 @@ trap_vector:
     sd t0,   4*8(sp)
     addi t0, sp, 272
     sd t0,   1*8(sp)
+
+3:
     sd t1,   5*8(sp)
     sd t2,   6*8(sp)
     sd s0,   7*8(sp)
@@ -39,12 +64,41 @@ trap_vector:
     sd t0, 31*8(sp)
     csrr t0, sstatus
     sd t0, 32*8(sp)
+
     mv a0, sp
     call trap_handler
+
+.global trap_return
+trap_return:
     ld t0, 31*8(sp)
     csrw sepc, t0
     ld t0, 32*8(sp)
     csrw sstatus, t0
+
+    # Prepare sscratch for the next trap. U-mode needs the kernel stack top
+    # there; S-mode uses zero so nested kernel traps keep the current stack.
+    andi t1, t0, SSTATUS_SPP
+    bnez t1, 4f
+    addi t1, sp, 272
+    csrw sscratch, t1
+    j 5f
+4:
+    csrw sscratch, zero
+
+5:
+    # Switch page table when a syscall such as exec/fork asks us to return
+    # to a different user address space.
+    la t0, switch_to_user
+    lw t1, 0(t0)
+    beqz t1, 6f
+    la t0, user_satp
+    ld t1, 0(t0)
+    csrw satp, t1
+    sfence.vma zero, zero
+    la t0, switch_to_user
+    sw zero, 0(t0)
+
+6:
     ld ra,   0*8(sp)
     ld gp,   2*8(sp)
     ld tp,   3*8(sp)
@@ -76,15 +130,4 @@ trap_vector:
     ld t5,  29*8(sp)
     ld t6,  30*8(sp)
     ld sp,   1*8(sp)
-
-    # ---- 检查是否需要切换到用户态 ----
-    la t0, switch_to_user
-    lw t1, 0(t0)
-    beqz t1, 1f
-    la t0, user_satp
-    ld t1, 0(t0)
-    csrw satp, t1
-    la t0, switch_to_user
-    sw zero, 0(t0)
-1:
     sret

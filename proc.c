@@ -125,6 +125,18 @@ void yield(void) {
     }
     current->state = RUNNING;
     if(sched_algorithm != 2) current->slice = 10;
+    if (current->pagetable) {
+        extern volatile int switch_to_user;
+        extern uint64_t user_satp;
+        user_satp = MAKE_SATP(current->pagetable);
+        switch_to_user = 1;
+    } else {
+        extern uint64_t *kernel_pagetable;
+        uint64_t satp = MAKE_SATP(kernel_pagetable);
+        asm volatile("csrw satp, %0" : : "r"(satp));
+        asm volatile("sfence.vma zero, zero");
+        w_sstatus(r_sstatus() | SSTATUS_SIE | SSTATUS_SUM);
+    }
     swtch(prev->context, current->context);
 }
 
@@ -182,17 +194,7 @@ int wait(int pid, int *status) {
             have_kids = 1;
             if (procs[i].state == ZOMBIE) {
                 int ret_pid = procs[i].pid;
-                
-                // 【核心修复 1】：从阻塞中醒来，写用户态内存前必须重新开启 SUM
-                if (status) {
-                    uint64_t old_sstatus = r_sstatus();
-                    w_sstatus(old_sstatus | (1ULL << 18)); // 开启 SUM
-                    
-                    *status = procs[i].exit_code;          // 安全写入
-                    
-                    w_sstatus(old_sstatus);                // 恢复原状
-                }
-                
+                if (status) *status = procs[i].exit_code;
                 procs[i].state = UNUSED;
                 return ret_pid;
             }
@@ -238,6 +240,8 @@ uint64_t* clone_user_pagetable(uint64_t *parent_pt) {
                             uint64_t *dst = (uint64_t *)new_page;
                             for(int b = 0; b < 512; b++) dst[b] = src[b]; 
                             new_pt2[k] = (((uint64_t)new_page >> 12) << 10) | (pte3 & 0x3FF);
+                        } else if (pte3 & PTE_V) {
+                            new_pt2[k] = pte3;
                         }
                     }
                 }
@@ -283,14 +287,15 @@ int fork(void) {
     np = allocproc();
     if(np == 0) return -1;
 
-    // 【核心修复】：兼容内核线程（如 init_process）发起的 fork 操作
-    // 如果当前进程有用户页表，则深拷贝；如果是内核线程，则子进程暂无页表
     if (current->pagetable) {
         np->pagetable = clone_user_pagetable(current->pagetable);
+        if (!np->pagetable) {
+            np->state = UNUSED;
+            return -1;
+        }
     } else {
-        np->pagetable = 0; 
+        np->pagetable = 0;
     }
-    
     np->ustack = current->ustack;
     np->entry = current->entry;
 
@@ -314,10 +319,11 @@ int fork(void) {
     uint64 *parent_stack = (uint64 *)parent_base;
     uint64 *child_stack = (uint64 *)(np->kstack - 8192);
     
+    // 【深度修复】：遍历子进程栈，重写所有的帧指针！彻底切断与父进程的孽缘！
     for(uint64 i = 0; i < 8192UL / sizeof(uint64); i++) {
         uint64 val = parent_stack[i];
         if (val >= parent_base && val <= parent_top) {
-            val = child_top - (parent_top - val); 
+            val = child_top - (parent_top - val); // 地址重定向到子栈
         }
         child_stack[i] = val;
     }
@@ -338,6 +344,38 @@ int fork(void) {
     np->context[14] = 0;
     np->state = RUNNABLE;
     np->parent = current;
+    return np->pid;
+}
+
+extern void trap_return(void);
+
+int fork_from_trap(struct trapframe *tf) {
+    struct proc *np = allocproc();
+    if (np == 0) return -1;
+
+    if (current->pagetable) {
+        np->pagetable = clone_user_pagetable(current->pagetable);
+        if (!np->pagetable) {
+            np->state = UNUSED;
+            return -1;
+        }
+    }
+
+    np->ustack = current->ustack;
+    np->entry = current->entry;
+    np->parent = current;
+
+    uint64 child_tf_addr = np->kstack - 272;
+    memcpy((void *)child_tf_addr, tf, sizeof(*tf));
+    struct trapframe *child_tf = (struct trapframe *)child_tf_addr;
+    child_tf->a0 = 0;
+    child_tf->sepc += 4;
+
+    for (int i = 0; i < 32; i++) np->context[i] = 0;
+    np->context[0] = (uint64)trap_return;
+    np->context[1] = child_tf_addr;
+    np->state = RUNNABLE;
+
     return np->pid;
 }
 
