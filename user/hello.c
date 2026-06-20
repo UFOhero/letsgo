@@ -19,9 +19,6 @@
 #endif
 
 // 显式声明用户态下尚未加入 userlib.h 的系统调用
-extern int fork(void);
-extern int wait(int pid, int *status);
-
 // 辅助函数：字符串比较
 int strcmp(const char *s1, const char *s2) {
     while (*s1 && (*s1 == *s2)) {
@@ -94,47 +91,35 @@ void test_process_and_loading() {
     print_str("\n[TEST 2] Process & Program Loading Module...\n");
     
     // 阶段 1: 测试 fork
-    print_str("  -> [Debug] Phase 1: Ready to call fork()...\n");
     int pid = fork();
-    
     if (pid < 0) {
         print_str("  [FAIL] fork() failed.\n");
     } else if (pid == 0) {
-        print_str("  -> [Child 1] fork() returned 0, entering child process.\n");
-        print_str("  -> [Child 1] Ready to call exit(0)...\n");
+        print_str("  [Child] fork() OK, exiting.\n");
         exit(0);
     } else {
-        print_str("  -> [Parent 1] fork() returned PID. Ready to call wait()...\n");
         int status;
         wait(pid, &status);
-        print_str("  -> [Parent 1] wait() completed.\n");
         print_str("  [PASS] fork() and wait() work.\n");
     }
 
     // 阶段 2: 测试 exec
-    print_str("  -> [Debug] Phase 2: Ready to call fork() for exec test...\n");
     pid = fork();
-    
     if (pid < 0) {
         print_str("  [FAIL] fork() failed.\n");
     } else if (pid == 0) {
-        print_str("  -> [Child 2] Fork successful. Preparing argv...\n");
-        char *argv[] = {"hello", "test_arg", 0};
-        
-        print_str("  -> [Child 2] Ready to call exec('/bin/hello')...\n");
-        // 如果是在这里崩溃，说明是 exec 拷贝参数到用户栈（很可能就在 0x7f000000）时发生了越界或缺页
-        exec("/bin/hello", argv);
-        
+        print_str("  [Child] Fork successful. Executing /bin/null...\n");
+        char *argv[] = {"null", "test_arg", 0};
+        exec("/bin/null", argv);
         print_str("  [FAIL] exec() failed in child.\n");
         exit(1);
     } else {
-        print_str("  -> [Parent 2] fork() returned PID. Ready to call wait()...\n");
         int status;
         wait(pid, &status);
         print_str("  [PASS] Parent wait() complete. Child process loaded, executed, and exited.\n");
     }
 }
-//----------------------------------------------------------
+// ---------------------------------------------------------
 // 测试 3: 内存管理 & 异常处理模块 (MMU, Page Fault, 进程隔离)
 // ---------------------------------------------------------
 void test_memory_and_exception() {
