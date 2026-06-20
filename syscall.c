@@ -93,7 +93,11 @@ static uint64_t sys_dup2(uint64_t oldfd, uint64_t newfd) {
     return fs_dup2(oldfd, newfd);
 }
 
-static uint64_t sys_fork(void) {
+static uint64_t sys_fork(struct trapframe *tf) {
+    return fork_from_trap(tf);
+}
+
+#if 0
     // 记录下 fork 前的父进程 PID
     uint64_t parent_pid = current->pid;
     
@@ -102,10 +106,16 @@ static uint64_t sys_fork(void) {
     // 因为 fork 完美复制了内核栈，子进程被调度唤醒后也会回到这里！
     // 此时对比一下当前执行流的 PID，如果变了，说明现在是子进程的躯壳在运行。
     if (current->pid != parent_pid) {
+        if (current->pagetable) {
+            user_satp = MAKE_SATP(current->pagetable);
+            switch_to_user = 1;
+        }
         return 0; // 子进程必须返回 0
     }
     return ret;   // 父进程返回子进程的 PID
 }
+
+#endif
 
 static uint64_t sys_wait(int pid, int *status) {
     return wait(pid, status);
@@ -121,7 +131,7 @@ void handle_syscall(struct trapframe *tf) {
     // 否则内核在 sys_write 读取用户字符串，或在 sys_wait 写入 status 时，
     // 会因为没有权限访问 PTE_U 的内存页而触发 Cause 15 死循环！
     uint64_t current_sstatus = r_sstatus();
-    w_sstatus(current_sstatus | SSTATUS_SIE | (1ULL << 18));
+    w_sstatus(current_sstatus | (1ULL << 18));
 
     uint64_t syscall_num = tf->a7;
     uint64_t ret_val = 0;
@@ -155,7 +165,7 @@ void handle_syscall(struct trapframe *tf) {
             ret_val = sys_dup2(tf->a0, tf->a1);
             break;
         case SYS_fork:
-            ret_val = sys_fork();
+            ret_val = sys_fork(tf);
             break;
         case SYS_wait:
             ret_val = sys_wait((int)tf->a0, (int *)tf->a1);

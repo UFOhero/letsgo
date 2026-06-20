@@ -39,6 +39,8 @@ void uart_intr(void) {
 // 供 OS 和系统调用读取，如果没字符主动出让 CPU 等待，防止卡死
 char uart_getc_blocking(void) {
     while (kbd_head == kbd_tail) {
+        char c = uart_getc();
+        if (c) return c;
         extern void yield(void);
         yield();
     }

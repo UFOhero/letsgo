@@ -72,6 +72,7 @@ int  create_proc(void (*func)(void));  //创建内核级进程
 void exit();  //终止进程
 int  wait(int pid, int *status);  //等待子进程退出
 int fork(void);  //复制当前进程
+int fork_from_trap(struct trapframe *tf);
 
 void swtch(uint64 *old_context, uint64 *new_context);  // 切换上下文
 void sem_init(struct semaphore *sem, int value);
