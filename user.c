@@ -23,13 +23,12 @@ void delay(int count) {
 // __attribute__ 保证这个函数永远处于二进制文件的最顶端 (0x40000000)
 __attribute__((section(".text.entry")))
 void _start(int task_id) {
-    // 内核在启动我们时，巧妙地把进程号塞在了 a0 (也就是参数 task_id) 里！
     while (1) {
         if (task_id == 0) {
             print("  --> Task 0 [Written in C!] is running gracefully...\n");
         } else {
             print("  --> Task 1 [Written in C!] is running gracefully...\n");
         }
-        delay(5000000); // 停顿一下，让输出像瀑布一样优雅
+        delay(5000000); // 停顿一下，让输出内容一次性输出
     }
 }

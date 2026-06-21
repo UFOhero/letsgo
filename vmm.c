@@ -49,7 +49,7 @@ void vmm_init(void) {
     // 1. 映射串口 (UART)
     vmm_map_page(kernel_pagetable, 0x10000000, 0x10000000, PTE_R | PTE_W);
 
-    // 【核心修复】：2. 映射中断控制器 (PLIC)
+    // 2. 映射中断控制器 (PLIC)
     // PLIC 的寄存器分散在几个特定的页里，我们必须为这些页授予读写权限，否则会触发 Cause 15
     vmm_map_page(kernel_pagetable, 0x0C000000, 0x0C000000, PTE_R | PTE_W); // 映射 PLIC_PRIORITY 所在的页
     vmm_map_page(kernel_pagetable, 0x0C002000, 0x0C002000, PTE_R | PTE_W); // 映射 PLIC_SENABLE 所在的页

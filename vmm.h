@@ -4,7 +4,7 @@
 
 #define PAGE_SIZE 4096
 
-#define PA2VA(pa) ((uint64_t)(pa))  // 未来可以改为: pa + 核心偏移量
+#define PA2VA(pa) ((uint64_t)(pa))  
 #define VA2PA(va) ((uint64_t)(va))
 
 // 页表项 (PTE) 的权限位标志

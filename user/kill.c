@@ -12,8 +12,6 @@ int atoi(const char *str) {
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        // 如果你的 userlib 支持 printf，就用 printf，否则这里可以直接写死退出
-        // printf("Usage: kill <pid>\n");
         char usage[] = "Usage: kill <pid>\n";
         write(1, usage, sizeof(usage) - 1);
         return -1;

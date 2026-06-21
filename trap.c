@@ -1,5 +1,3 @@
-// trap.c 完整修改后代码（仅展示修改后的 case 12/13/15 部分，其余不变）
-// 在文件开头确保包含 proc.h
 #include <stdint.h>
 #include "syscall.h"
 #include "csr.h"
@@ -95,10 +93,6 @@ void trap_handler(struct trapframe *tf) {
                 int from_user = !(sstatus & SSTATUS_SPP);
                 uint64_t aligned_va = fault_addr & ~0xFFFULL;
 
-                // 【核心修复】：不再通过 from_user 判断归属，而是通过地址范围！
-                // 凡是 < 0x80000000 的地址，都属于用户态内存空间。
-                // 无论是用户程序自己触发的，还是内核在执行 sys_wait/sys_read 时代表用户访问触发的，
-                // 都必须将新物理页分配并映射到 "当前进程的用户页表" 中！
                 if (fault_addr < 0x80000000ULL) {
                     if (!current || !current->pagetable) {
                         panic("Page fault on user address, but no active process!");
@@ -120,7 +114,6 @@ void trap_handler(struct trapframe *tf) {
                         void *page = pmm_alloc_frame();
                         if (!page) panic("OOM during User Space Demand Paging!");
                         
-                        // 注意：必须映射到 current->pagetable，并带上 PTE_U 权限！
                         // 这样用户进程，以及开启了 SUM 位的内核态，才能成功访问该页。
                         vmm_map_page(current->pagetable, aligned_va, (uint64_t)page, 
                                      PTE_R | PTE_W | PTE_X | PTE_U);

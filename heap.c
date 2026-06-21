@@ -27,16 +27,16 @@ static void expand_heap(uint64_t size) {
     uint64_t start_va = current_heap_end;
 
     for (uint64_t i = 0; i < pages_needed; i++) {
-        // 1. 拿一个真实的物理页
+        // 拿一个真实的物理页
         uint64_t pa = (uint64_t)pmm_alloc_frame();
         if (!pa) panic("[Heap] Out of Physical Memory!");
         
-        // 2. 【魔法时刻】：无论物理页多乱，我们把它按顺序拼接到 current_heap_end 上！
+        // 把它按顺序拼接到 current_heap_end 
         vmm_map_page(kernel_pagetable, current_heap_end, pa, PTE_R | PTE_W);
         current_heap_end += PAGE_SIZE;
     }
     
-    // 刷新 TLB，因为我们改了页表
+    // 刷新TLB
     __asm__ volatile("sfence.vma zero, zero");
 
     // 把新要来的这一大片连续虚拟内存，做成一个大的 block，塞进空闲链表
@@ -85,7 +85,7 @@ void *kmalloc(uint64_t size) {
         curr = curr->next;
     }
 
-    // 如果遍历完发现没有足够大的块？不用怕，让堆扩张！
+    // 如果遍历完发现没有足够大的块，让堆扩张
     expand_heap(total_size);
     
     // 扩张完了，重新调用自己，这次一定能分配成功
@@ -98,6 +98,6 @@ void kfree(void *ptr) {
     // 指针往回倒退一个 header 的大小，找到元数据
     struct block_header *block = (struct block_header *)((uint64_t)ptr - sizeof(struct block_header));
     
-    // 第一版为了求稳，我们暂时不合并碎片，只做简单的标记释放
+    // 暂时不合并碎片，只做简单的标记释放
     block->is_free = 1;
 }

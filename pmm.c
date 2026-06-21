@@ -28,7 +28,7 @@ void pmm_init(uint64_t mem_start, uint64_t mem_end) {
     bitmap = (uint8_t *)mem_start;
 
     // 4. 清空位图：0 表示全部空闲
-    // 【核心修复】：强制真实写入，不准编译器把清零循环优化为 Dead Store
+    // 强制真实写入，不准编译器把清零循环优化为 Dead Store
     volatile uint8_t *v_bitmap = (volatile uint8_t *)bitmap;
     for (uint64_t i = 0; i < bitmap_bytes; i++) {
         v_bitmap[i] = 0;
@@ -58,7 +58,7 @@ void *pmm_alloc_frame(void) {
             // 计算其实际物理地址
             uint64_t allocated_pa = page_start_addr + (i * PAGE_SIZE);
             
-            // 【核心修复】：强制清空物理页，杜绝上一轮的垃圾数据欺骗 MMU
+            // 强制清空物理页，杜绝上一轮的垃圾数据欺骗 MMU
             volatile uint64_t *clear_ptr = (volatile uint64_t *)allocated_pa;
             for (int j = 0; j < PAGE_SIZE / 8; j++) {
                 clear_ptr[j] = 0;

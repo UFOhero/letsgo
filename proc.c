@@ -207,9 +207,7 @@ int wait(int pid, int *status) {
     }
 }
 
-// -------------------------------------------------------------
-// 【深度克隆用户页表】 物理隔离父子进程
-// -------------------------------------------------------------
+// 深度克隆用户页表 物理隔离父子进程
 uint64_t* clone_user_pagetable(uint64_t *parent_pt) {
     uint64_t *child_pt = (uint64_t *)pmm_alloc_frame();
     if (!child_pt) return 0;
@@ -254,9 +252,6 @@ uint64_t* clone_user_pagetable(uint64_t *parent_pt) {
     return child_pt;
 }
 
-// -------------------------------------------------------------
-// 【核心修复】：上下文快照捕获，解决 C 语言 Epilogue 丢失问题
-// -------------------------------------------------------------
 asm(
     ".text\n"
     ".global capture_context\n"
@@ -322,7 +317,7 @@ int fork(void) {
     uint64 *parent_stack = (uint64 *)parent_base;
     uint64 *child_stack = (uint64 *)(np->kstack - 8192);
     
-    // 【深度修复】：遍历子进程栈，重写所有的帧指针！彻底切断与父进程的孽缘！
+    // 遍历子进程栈，重写所有的帧指针，彻底切断与父进程的连接
     for(uint64 i = 0; i < 8192UL / sizeof(uint64); i++) {
         uint64 val = parent_stack[i];
         if (val >= parent_base && val <= parent_top) {
@@ -517,15 +512,12 @@ int do_kill(int pid) {
         struct proc *p = &procs[i];
         if (p->pid != (uint64)pid || p->state == UNUSED) continue;
 
-        // Do not kill kernel-only processes such as the shell/idle task.
-        // Also do not let the kill utility kill itself; it must return to shell.
+
         if (p->pagetable == 0 || p == current) return -1;
 
         p->exit_code = -9;
         p->state = ZOMBIE;
 
-        // Match the important side effects of exit(): wake the waiter and
-        // detach children so the killed process is no longer schedulable.
         wakeup(p->parent);
         for (int j = 0; j < NPROC; j++) {
             if (procs[j].parent == p) procs[j].parent = 0;

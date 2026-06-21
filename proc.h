@@ -75,17 +75,16 @@ int fork(void);  //复制当前进程
 int fork_from_trap(struct trapframe *tf);
 
 void swtch(uint64 *old_context, uint64 *new_context);  // 切换上下文
-void sem_init(struct semaphore *sem, int value);
-void sem_wait(struct semaphore *sem);
-void sem_signal(struct semaphore *sem);
-void schedule(struct trapframe *tf);
+void sem_init(struct semaphore *sem, int value);       // 初始化信号量
+void sem_wait(struct semaphore *sem);                  // 等待信号量
+void sem_signal(struct semaphore *sem);                // 释放信号量
+void schedule(struct trapframe *tf);                   // 调度器入口
 
 void uart_putc(char c);
 void uart_puts(const char *str);
 int printf(const char *fmt, ...);
 int exec(const char *path, char *const argv[], uint64_t *out_argc, uint64_t *out_argv);
 
-// proc.h 末尾
 void do_ps(void);
 int do_kill(int pid);
 

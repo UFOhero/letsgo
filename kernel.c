@@ -42,13 +42,12 @@ static int readline(char *buf, int max) {
     buf[i] = '\0'; return i;
 }
 
-// 【彻底移除 ksyscall 宏，内核自己不准给自己发 ecall！】
 
 #include "string.h"
 #include "fs.h"
 #include "proc.h"
 
-// ==== 核心修复：全局变量池，跨越父子内核栈的桥梁 ====
+// ==== 全局变量池，跨越父子内核栈的桥梁 ====
 static char exec_path[64];
 static char exec_argv_buf[16][64];
 static char *exec_argv[16];
@@ -88,10 +87,8 @@ static void execute_command(char *cmd) {
         else { printf("Cannot open output file: %s\n", redirect_out); goto restore; }
     }
 
-    // ==========================================
-    // 【核心修复】：类 Unix 系统的 $PATH 寻址逻辑
+
     // 如果输入的命令不是路径，自动去 /bin/ 目录下寻找
-    // ==========================================
     char path[64];
     if (argv[0][0] != '/' && argv[0][0] != '.') {
         strcpy(path, "/bin/");
@@ -129,13 +126,13 @@ static void execute_command(char *cmd) {
             sstatus &= ~(1ULL << 8); // 设置进入 User 模式
             sstatus |= (1ULL << 5);  // 开启中断 SPIE
             
-            // 【核心修复】：必须通知 trap_vec 系统我们要去用户态了！
+            // 必须通知 trap_vec 系统要去用户态
             switch_to_user = 1;
             user_satp = satp;
             uint64_t kstack_top = current->kstack;
             
             __asm__ volatile(
-                "csrw sscratch, %6\n"   // <--- 救命的寄存器！为下一次中断提供内核栈入口！
+                "csrw sscratch, %6\n"   // 为下一次中断提供内核栈入口！
                 "csrw satp, %0\n"
                 "sfence.vma zero, zero\n"
                 "csrw sstatus, %1\n"
@@ -206,12 +203,9 @@ void kernel_main(uint64_t hartid, uint64_t dtb_pa) {
     create_user_files();
     timer_init();
 
-    // 【核心修复 1】：必须在调度器启动前，合上总电闸！
-    // 因为下方的 proc_init 会带着 CPU 飞向第一个进程，再也不会返回这里了
     w_sie(r_sie() | SIE_STIE | SIE_SEIE); 
     w_sstatus(r_sstatus() | SSTATUS_SIE | SSTATUS_SUM); 
 
-    proc_init(); // 一去不复返的时光机
+    proc_init(); 
     
-    // （删掉这里原本无用的 w_sie, w_sstatus 和 shell_loop）
 }

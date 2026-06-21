@@ -22,7 +22,7 @@ char uart_getc(void) {
 
 void uart_puts(const char *str) { while (*str) uart_putc(*str++); }
 
-// =================【核心重构：键盘环形缓冲区】=================
+//键盘环形缓冲区
 #define KBD_BUF_SIZE 256
 static char kbd_buf[KBD_BUF_SIZE];
 static volatile int kbd_head = 0, kbd_tail = 0;
@@ -48,7 +48,6 @@ char uart_getc_blocking(void) {
     kbd_head = (kbd_head + 1) % KBD_BUF_SIZE;
     return c;
 }
-// ==========================================================
 
 static void print_hex(uint64_t val) {
     const char *hex_chars = "0123456789abcdef";
@@ -102,5 +101,3 @@ int printf(const char *fmt, ...) {
     va_end(args);
     return 0;
 }
-
-// memcpy 已移除，由 string.o 提供

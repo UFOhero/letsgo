@@ -55,7 +55,6 @@ void load_elf_map(uint64_t *pagetable, const void *elf_data) {
                 memcpy((void*)(pa + (copy_start_va - va)),
                        (const uint8_t*)elf_data + file_off, len);
             }
-            // pmm_alloc_frame 已清零，.bss 无需额外处理
         }
     }
 }

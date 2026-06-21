@@ -9,10 +9,10 @@
 // Supervisor Interrupt Enable 位 (全局中断开关)
 #define SSTATUS_SIE (1ULL << 1)
 
-// 【新增】：用于状态切换的位掩码
+// 用于状态切换的位掩码
 #define SSTATUS_SPIE (1ULL << 5) // S 模式之前的硬件中断使能状态
 #define SSTATUS_SPP  (1ULL << 8) // S 模式之前的特权级 (0=U-Mode, 1=S-Mode)
-#define SSTATUS_SUM (1ULL << 18)
+#define SSTATUS_SUM (1ULL << 18) // 允许 S-Mode 访问 U-Mode 内存
 
 // 读取 scause (Trap原因)
 static inline uint64_t r_scause() {

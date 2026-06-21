@@ -4,10 +4,7 @@
 .equ SSTATUS_SPP, 256
 
 trap_vector:
-    # If sscratch is non-zero, the trap came from U-mode and sscratch
-    # contains the current process kernel stack top. Swap to it.
-    # If sscratch is zero, this is an S-mode trap; restore the original sp
-    # and save the trapframe on the current kernel stack.
+
     csrrw sp, sscratch, sp
     bnez sp, 1f
     csrrw sp, sscratch, sp
@@ -75,8 +72,6 @@ trap_return:
     ld t0, 32*8(sp)
     csrw sstatus, t0
 
-    # Prepare sscratch for the next trap. U-mode needs the kernel stack top
-    # there; S-mode uses zero so nested kernel traps keep the current stack.
     andi t1, t0, SSTATUS_SPP
     bnez t1, 4f
     addi t1, sp, 272
@@ -86,8 +81,7 @@ trap_return:
     csrw sscratch, zero
 
 5:
-    # Switch page table when a syscall such as exec/fork asks us to return
-    # to a different user address space.
+
     la t0, switch_to_user
     lw t1, 0(t0)
     beqz t1, 6f

@@ -143,7 +143,7 @@ int fs_open(const char *path, int flags) {
         if (!inode_table[inode_num].used || inode_table[inode_num].type != INODE_FILE) {
             return -1;
         }
-        // 【核心修复】：文件已存在，如果带有 O_TRUNC 标志且为写入模式，将文件大小截断为 0
+        // 文件已存在，如果带有 O_TRUNC 标志且为写入模式，将文件大小截断为 0
         if ((flags & O_TRUNC) && (flags & (O_WRONLY | O_RDWR))) {
             inode_table[inode_num].size = 0;
         }
@@ -175,7 +175,7 @@ int fs_read(int fd, void *buf, int count) {
     if (fd < 0 || fd >= MAX_FD || !current_fd_table[fd].valid) return -1;
     file_desc_t *f = &current_fd_table[fd];
     
-    // 【核心修复 1】：将终端读操作接入 VFS，并支持 Ctrl+D 作为 EOF
+    // 将终端读操作接入 VFS，并支持 Ctrl+D 作为 EOF
     if (f->inode == TERMINAL_INODE) {
         extern char uart_getc_blocking(void);
         if (count > 0) {
@@ -342,6 +342,9 @@ extern unsigned int ps_elf_len;
 extern unsigned char kill_elf[];
 extern unsigned int kill_elf_len;
 
+extern unsigned char spawn_elf[];
+extern unsigned int spawn_elf_len;
+
 static void install_user_program(const char *path, unsigned char *elf, unsigned int len) {
     int fd = fs_open(path, O_RDWR | O_CREAT | O_TRUNC);
     if (fd >= 0) {
@@ -374,7 +377,9 @@ void create_user_files(void) {
     install_user_program("/bin/test_fs", test_fs_elf, test_fs_elf_len);
     install_user_program("/bin/test_exec", test_exec_elf, test_exec_elf_len);
     install_user_program("/bin/test_sched", test_sched_elf, test_sched_elf_len);
-
+    
     install_user_program("/bin/ps", ps_elf, ps_elf_len);
     install_user_program("/bin/kill", kill_elf, kill_elf_len);
+
+    install_user_program("/bin/spawn", spawn_elf, spawn_elf_len);
 }
